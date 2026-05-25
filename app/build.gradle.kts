@@ -15,11 +15,11 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "dev.minios.ocremote"
+        applicationId = "com.muhammad.ocremote"
         minSdk = 26
         targetSdk = 34
-        versionCode = 20
-        versionName = "1.6.7"
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -47,7 +47,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            manifestPlaceholders["appLabel"] = "OC Remote Dev"
+            manifestPlaceholders["appLabel"] = "OC Muhammad Dev"
         }
         release {
             manifestPlaceholders["appLabel"] = "@string/app_name"
