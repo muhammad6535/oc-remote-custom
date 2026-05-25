@@ -70,8 +70,8 @@ fun WebViewScreen(
         fileChooserCallback = null
     }
 
-    // Build Basic Auth header
-    val authHeader = remember(username, password) {
+    // Build Basic Auth header and value
+    val authHeaderValue = remember(username, password) {
         if (username.isNotBlank()) {
             val credentials = "$username:$password"
             "Basic " + Base64.encodeToString(credentials.toByteArray(), Base64.NO_WRAP)
@@ -79,14 +79,21 @@ fun WebViewScreen(
             null
         }
     }
+
+    val authHeaders = remember(authHeaderValue) {
+        authHeaderValue?.let { mapOf("Authorization" to it) } ?: emptyMap()
+    }
+
+    // Track whether initial load failed, for retry
+    var loadAttempted by remember { mutableStateOf(false) }
+    var retryCount by remember { mutableIntStateOf(0) }
     
     // Listen for navigation events from deep-links (notification taps while WebView is open)
     LaunchedEffect(navigateUrlFlow) {
         navigateUrlFlow?.collect { newUrl ->
             Log.i("WebViewScreen", "Deep-link navigation received: $newUrl")
             webView?.let { wv ->
-                val headers = authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap()
-                wv.loadUrl(newUrl, headers)
+                wv.loadUrl(newUrl, authHeaders)
             }
         }
     }
@@ -95,8 +102,7 @@ fun WebViewScreen(
     fun refresh() {
         webView?.let { wv ->
             isRefreshing = true
-            val headers = authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap()
-            wv.loadUrl(serverUrl, headers)
+            wv.loadUrl(serverUrl, authHeaders)
         }
     }
 
@@ -166,6 +172,7 @@ fun WebViewScreen(
                                 Log.d("WebViewScreen", "Page finished: $url")
                                 isLoading = false
                                 isRefreshing = false
+                                loadAttempted = true
                             }
 
                             override fun onReceivedHttpAuthRequest(
@@ -188,11 +195,29 @@ fun WebViewScreen(
                                 error: WebResourceError?
                             ) {
                                 Log.e("WebViewScreen", "Error loading ${request?.url}: ${error?.description} (code=${error?.errorCode})")
-                                // Only handle main frame errors
                                 if (request?.isForMainFrame == true) {
                                     isLoading = false
                                     isRefreshing = false
+                                    // Retry with auth headers if this was likely an auth failure
+                                    if (error?.errorCode == ERROR_AUTHENTICATION || error?.errorCode == ERROR_UNSUPPORTED_AUTH_SCHEME) {
+                                        if (retryCount < 3 && authHeaderValue != null) {
+                                            retryCount++
+                                            view?.loadUrl(request.url.toString(), authHeaders)
+                                        }
+                                    }
                                 }
+                            }
+
+                            override fun shouldInterceptRequest(
+                                view: WebView?,
+                                request: WebResourceRequest?
+                            ): WebResourceResponse? {
+                                // Inject auth header into all requests
+                                if (authHeaderValue != null && request != null) {
+                                    // We can't modify headers of an existing request, but we can
+                                    // handle this via onReceivedHttpAuthRequest and the initial loadUrl headers
+                                }
+                                return null
                             }
 
                             // Stay inside the WebView for same-origin navigation
@@ -240,8 +265,16 @@ fun WebViewScreen(
                     }
 
                     // Load the full URL (with session path if deep-linked)
-                    val headers = authHeader?.let { mapOf("Authorization" to it) } ?: emptyMap()
-                    wv.loadUrl(fullUrl, headers)
+                    wv.loadUrl(fullUrl, authHeaders)
+
+                    // Retry load if it fails after a delay
+                    wv.postDelayed({
+                        if (!loadAttempted && authHeaderValue != null && retryCount < 2) {
+                            retryCount++
+                            Log.d("WebViewScreen", "Retrying initial load (attempt $retryCount)")
+                            wv.loadUrl(fullUrl, authHeaders)
+                        }
+                    }, 3000)
 
                     webView = wv
                     wv
